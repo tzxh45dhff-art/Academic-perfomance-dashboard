@@ -709,7 +709,7 @@ function App() {
         {activeTab === 'profile' && (
           <div className="glass-card" style={{ padding: '32px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
             <div className="profile-avatar" style={{ width: '96px', height: '96px', margin: '0 auto 24px auto', border: '2px solid var(--brand-blue)' }}></div>
-            <h2 style={{ fontSize: '2rem', marginBottom: '8px' }}>{data ? data.user_profile.name : "Hackathon Admin"}</h2>
+            <h2 style={{ fontSize: '2rem', marginBottom: '8px' }}>{data ? data.user_profile.name : "Rachit Goyal"}</h2>
             <p style={{ color: 'var(--brand-blue)', fontWeight: 600, fontSize: '1.2rem', marginBottom: '8px' }}>{data ? data.user_profile.role : "Lead Educator"}</p>
             <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', marginBottom: '32px' }}>{data ? data.user_profile.institution : "Tech Innovators Academy"}</p>
 
@@ -738,7 +738,7 @@ function App() {
         <div className="profile-card">
           <div className="profile-avatar"></div>
           <div>
-            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{data ? data.user_profile.name : "Hackathon Admin"}</div>
+            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{data ? data.user_profile.name : "Rachit Goyal"}</div>
             <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
               {data ? `${data.overall_students_analyzed} Students Loaded` : "Awaiting Data"}
             </div>

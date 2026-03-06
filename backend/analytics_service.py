@@ -211,7 +211,7 @@ def process_academic_data(csv_content: bytes) -> dict:
             "correlation_analysis": correlation_analysis,
             "cohort_migration": cohort_migration,
             "user_profile": {
-                "name": "Jane Hackathon",
+                "name": "Rachit Goyal",
                 "role": "Lead Educator",
                 "institution": "Tech Innovators Academy"
             }
