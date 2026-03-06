@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+
+<html lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Professor Analytics Dashboard - ProData</title>
+<!-- Google Fonts: Inter -->
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&amp;display=swap" rel="stylesheet"/>
+<!-- Tailwind CSS CDN with Plugins -->
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<!-- Chart.js for Data Visualizations -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: '#0d33f2',
+            surface: '#0a0c10',
+            glass: 'rgba(255, 255, 255, 0.05)',
+            'glass-border': 'rgba(255, 255, 255, 0.1)',
+          },
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+          },
+          borderRadius: {
+            'custom': '12px',
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="glassmorphism">
+    .glass-card {
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+    .active-nav {
+      background: rgba(13, 51, 242, 0.15);
+      border-right: 3px solid #0d33f2;
+      box-shadow: 0 0 15px rgba(13, 51, 242, 0.3);
+    }
+    .neon-glow-blue {
+      box-shadow: 0 0 15px rgba(13, 51, 242, 0.4);
+    }
+    .neon-glow-red {
+      box-shadow: 0 0 15px rgba(239, 68, 68, 0.4);
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 10px;
+    }
+    body {
+      background-color: #0a0c10;
+      color: #e5e7eb;
+    }
+  </style>
+</head>
+<body class="font-sans antialiased overflow-hidden">
+<div class="flex h-screen w-full">
+<!-- BEGIN: Sidebar -->
+<aside class="w-64 h-full glass-card border-r border-glass-border flex flex-col z-20" data-purpose="navigation-sidebar" id="sidebar">
+<div class="p-6">
+<div class="flex items-center gap-3">
+<div class="w-8 h-8 bg-brand rounded-custom flex items-center justify-center neon-glow-blue">
+<svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<span class="text-xl font-bold tracking-tight">ProAnalytics</span>
+</div>
+</div>
+<nav class="flex-1 mt-4 px-3 space-y-1">
+<a class="flex items-center px-4 py-3 rounded-custom text-brand active-nav transition-all duration-200" href="#">
+<svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Dashboard
+        </a>
+<a class="flex items-center px-4 py-3 rounded-custom text-gray-400 hover:bg-white/5 transition-all" href="#">
+<svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Students
+        </a>
+<a class="flex items-center px-4 py-3 rounded-custom text-gray-400 hover:bg-white/5 transition-all" href="#">
+<svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Performance
+        </a>
+<a class="flex items-center px-4 py-3 rounded-custom text-gray-400 hover:bg-white/5 transition-all" href="#">
+<svg class="w-5 h-5 mr-3" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Schedule
+        </a>
+</nav>
+<div class="p-6 border-t border-glass-border">
+<div class="flex items-center gap-3">
+<img alt="Prof. Avatar" class="w-10 h-10 rounded-full border border-glass-border" src="https://lh3.googleusercontent.com/aida-public/AB6AXuDP3S3hcsSOTcGIK1wooF5C--kphuRNhb1DxxiC47mgrslCEP5ouT0H9nYmos-62WPa0-BhTIC6adpZuV61Zm5ENmdv7i3rSOV_pA-D6w0T4d8GFcF1BNhDXOeZmi1dBDCfSPE_BSHr4fbuBN29Wyeitq1RKimugBM7nlQ8Wf6L56id44HRtq4zIyBq-0arR1FdbHl3kNpcGP8xbBMG_sLxCslXaVeqGNes3bh2AdhUQ-zNmWRuDPGVMhVkmTT0snym0DUtZ4ZY7PM"/>
+<div>
+<p class="text-sm font-semibold">Dr. Julian Vance</p>
+<p class="text-xs text-gray-500">Computer Science</p>
+</div>
+</div>
+</div>
+</aside>
+<!-- END: Sidebar -->
+<!-- BEGIN: Main Content Area -->
+<main class="flex-1 overflow-y-auto custom-scrollbar p-8 bg-[#0a0c10]" data-purpose="dashboard-main">
+<!-- BEGIN: Top Header Bar -->
+<header class="flex justify-between items-center mb-8">
+<div>
+<h1 class="text-3xl font-bold tracking-tight">Overview Dashboard</h1>
+<p class="text-gray-400">Class: Advanced Algorithm Design (CS-402)</p>
+</div>
+<div class="flex items-center gap-4">
+<button class="glass-card px-4 py-2 rounded-custom text-sm font-medium hover:bg-white/10 transition-all">Export Data</button>
+<button class="bg-brand text-white px-4 py-2 rounded-custom text-sm font-medium neon-glow-blue">Refresh Metrics</button>
+</div>
+</header>
+<!-- END: Top Header Bar -->
+<!-- BEGIN: Metric Cards Row -->
+<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8" data-purpose="key-metrics">
+<!-- Class Average -->
+<div class="glass-card p-6 rounded-custom relative overflow-hidden group">
+<div class="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+<svg class="w-12 h-12 text-blue-400" fill="currentColor" viewbox="0 0 24 24"><path d="M16 6l2.29 2.29-4.88 4.88-4-4L2 16.59 3.41 18l6-6 4 4 6.3-6.29L22 12V6h-6z"></path></svg>
+</div>
+<p class="text-gray-400 text-sm font-medium">Class Avg.</p>
+<div class="flex items-baseline gap-2 mt-1">
+<h3 class="text-3xl font-bold">84.2%</h3>
+<span class="text-green-400 text-xs">+2.4%</span>
+</div>
+<div class="w-full bg-white/5 h-1 mt-4 rounded-full overflow-hidden">
+<div class="bg-brand h-full w-[84%] neon-glow-blue"></div>
+</div>
+</div>
+<!-- Attendance -->
+<div class="glass-card p-6 rounded-custom relative overflow-hidden group">
+<p class="text-gray-400 text-sm font-medium">Attendance</p>
+<div class="flex items-baseline gap-2 mt-1">
+<h3 class="text-3xl font-bold">92.0%</h3>
+<span class="text-gray-500 text-xs">Stable</span>
+</div>
+<div class="w-full bg-white/5 h-1 mt-4 rounded-full overflow-hidden">
+<div class="bg-emerald-500 h-full w-[92%]" style="box-shadow: 0 0 10px rgba(16, 185, 129, 0.4)"></div>
+</div>
+</div>
+<!-- Submissions -->
+<div class="glass-card p-6 rounded-custom relative overflow-hidden group">
+<p class="text-gray-400 text-sm font-medium">Submissions</p>
+<div class="flex items-baseline gap-2 mt-1">
+<h3 class="text-3xl font-bold">48/52</h3>
+<span class="text-yellow-400 text-xs">4 Pending</span>
+</div>
+<div class="w-full bg-white/5 h-1 mt-4 rounded-full overflow-hidden">
+<div class="bg-yellow-500 h-full w-[92%]" style="box-shadow: 0 0 10px rgba(234, 179, 8, 0.4)"></div>
+</div>
+</div>
+<!-- At-Risk -->
+<div class="glass-card p-6 rounded-custom border-red-500/20 relative overflow-hidden group">
+<p class="text-gray-400 text-sm font-medium">At-Risk Students</p>
+<div class="flex items-baseline gap-2 mt-1">
+<h3 class="text-3xl font-bold text-red-400">03</h3>
+<span class="text-red-500 text-xs">+1 New</span>
+</div>
+<div class="w-full bg-white/5 h-1 mt-4 rounded-full overflow-hidden">
+<div class="bg-red-500 h-full w-[15%] neon-glow-red"></div>
+</div>
+</div>
+</div>
+<!-- END: Metric Cards Row -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+<!-- BEGIN: Performance Chart -->
+<div class="lg:col-span-2 glass-card p-6 rounded-custom" data-purpose="main-chart-container">
+<div class="flex justify-between items-center mb-6">
+<h2 class="text-lg font-semibold">Mark Distribution (Current vs Previous)</h2>
+<div class="flex gap-2">
+<span class="flex items-center text-xs text-gray-400"><span class="w-2 h-2 rounded-full bg-brand mr-1"></span> Current</span>
+<span class="flex items-center text-xs text-gray-400"><span class="w-2 h-2 rounded-full bg-gray-600 mr-1"></span> Previous</span>
+</div>
+</div>
+<div class="h-80 w-full">
+<canvas id="performanceChart"></canvas>
+</div>
+</div>
+<!-- END: Performance Chart -->
+<!-- BEGIN: At-Risk Alerts -->
+<div class="glass-card p-6 rounded-custom overflow-hidden flex flex-col" data-purpose="at-risk-list">
+<h2 class="text-lg font-semibold mb-4">Urgent Attention Needed</h2>
+<div class="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-2">
+<!-- Student 1 -->
+<div class="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5 hover:border-brand/30 transition-all">
+<div class="flex items-center gap-3">
+<img alt="Avatar" class="w-10 h-10 rounded-full border-2 border-red-500/50" src="https://lh3.googleusercontent.com/aida-public/AB6AXuB75LFSmGG_znJP8osy-CY8dhMNMdaAN80ggXFf5BOZsj_BDPdPoeHmGRus_Rb144p-720PCw9OY27S42UhiECbmD6y9zULFAmgT0qnuix9rTeZY9q9k6pdWJ8kskVaV5FJtD6S4g754keDp03AkgKA2TQ2RSe62MlwfXWK1jEQeTG7UeSMcjOfQk0mi1tD2cCfNNt3xDh7cnQFDeETQEOuZzZVBFlOUtQtpL1QoW1iEWElGRvlSM14HKr0VXTrWwwcKp2MYp1sNZQ"/>
+<div>
+<p class="text-sm font-medium">Elias Thorne</p>
+<p class="text-xs text-gray-500">ID: 4492-CS</p>
+</div>
+</div>
+<span class="text-[10px] px-2 py-1 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 uppercase tracking-wider font-bold">Attendance</span>
+</div>
+<!-- Student 2 -->
+<div class="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5 hover:border-brand/30 transition-all">
+<div class="flex items-center gap-3">
+<img alt="Avatar" class="w-10 h-10 rounded-full border-2 border-yellow-500/50" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCXmWHkC2V0_-UhXRgech25ewftjVXkfvVtBbPo847S5qvry8yp8_dkMUN4hI7MwI0OnPb3GdfpJiC1AosQr8USRms0g1lj6D7DLioo84JEV1SbeVXCfowC20e5GIQfBRIidyTIHSl4PjMu5nbFIecJc56L5oAhRVQqdYXgousgOGc8po6gJ6KJzcwSuBJZs95o_55ipVxS_abWvKPkwp1JBvh_3YIUa-fcnhIbWVicbxYPMgKJWiH0N7jx79SvVYMQkf2OBZHGxcE"/>
+<div>
+<p class="text-sm font-medium">Sarah Jenkins</p>
+<p class="text-xs text-gray-500">ID: 1022-CS</p>
+</div>
+</div>
+<span class="text-[10px] px-2 py-1 rounded-full bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 uppercase tracking-wider font-bold">Grades</span>
+</div>
+<!-- Student 3 -->
+<div class="flex items-center justify-between p-3 rounded-lg bg-white/5 border border-white/5 hover:border-brand/30 transition-all">
+<div class="flex items-center gap-3">
+<img alt="Avatar" class="w-10 h-10 rounded-full border-2 border-red-500/50" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCCIs-AkqAWw8z3MQuoRYIVy3IAxQP9gk0yXUQ-b35p9kFHWB4SFcpUK_5XYePqYY5trO04J8vkR5mRHOUhoOwNYbmiNO1TvutyupxEBbhmMvFg1WrX5T9n2ri1xOq7eFjpWN0EasXow7rdQElMXC86pdlODSOCdSjgrry86xoDvIWaIyQh-lY0PQEhjjJ0GaxdmXM4M0yb6loqAcGyKc84eXu_o_64dLydLZoFR5ccnR2mV2AWjR4FE5CSr-d2SgWhp5MX_wRmPKo"/>
+<div>
+<p class="text-sm font-medium">Marcus Vile</p>
+<p class="text-xs text-gray-500">ID: 8831-CS</p>
+</div>
+</div>
+<span class="text-[10px] px-2 py-1 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 uppercase tracking-wider font-bold">Missing</span>
+</div>
+</div>
+<button class="w-full mt-4 py-2 text-xs font-semibold text-gray-400 hover:text-white transition-colors border-t border-glass-border pt-4">View All Detailed Analytics</button>
+</div>
+<!-- END: At-Risk Alerts -->
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+<!-- BEGIN: Predictive Trend Chart -->
+<div class="glass-card p-6 rounded-custom" data-purpose="predictive-trend">
+<h2 class="text-lg font-semibold mb-6">Predictive Grade Trend (Final Exam)</h2>
+<div class="h-64 w-full">
+<canvas id="predictiveChart"></canvas>
+</div>
+</div>
+<!-- END: Predictive Trend Chart -->
+<!-- BEGIN: Student Engagement Heatmap UI -->
+<div class="glass-card p-6 rounded-custom" data-purpose="engagement-heatmap">
+<div class="flex justify-between items-center mb-6">
+<h2 class="text-lg font-semibold">Weekly Engagement Heatmap</h2>
+<div class="flex gap-1">
+<span class="w-3 h-3 bg-brand/10 rounded-sm"></span>
+<span class="w-3 h-3 bg-brand/40 rounded-sm"></span>
+<span class="w-3 h-3 bg-brand/70 rounded-sm"></span>
+<span class="w-3 h-3 bg-brand rounded-sm"></span>
+</div>
+</div>
+<!-- Heatmap Simulation -->
+<div class="grid grid-cols-7 gap-2">
+<!-- Day labels -->
+<div class="text-[10px] text-gray-500 text-center uppercase">Mon</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Tue</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Wed</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Thu</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Fri</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Sat</div>
+<div class="text-[10px] text-gray-500 text-center uppercase">Sun</div>
+<!-- Rows for 4 weeks -->
+<!-- We'll generate a grid of 28 squares with varying opacities of the brand color -->
+<div class="h-10 rounded-sm bg-brand/80"></div>
+<div class="h-10 rounded-sm bg-brand/40"></div>
+<div class="h-10 rounded-sm bg-brand/20"></div>
+<div class="h-10 rounded-sm bg-brand/60"></div>
+<div class="h-10 rounded-sm bg-brand"></div>
+<div class="h-10 rounded-sm bg-brand/10"></div>
+<div class="h-10 rounded-sm bg-brand/10"></div>
+<div class="h-10 rounded-sm bg-brand/30"></div>
+<div class="h-10 rounded-sm bg-brand/70"></div>
+<div class="h-10 rounded-sm bg-brand/90"></div>
+<div class="h-10 rounded-sm bg-brand/40"></div>
+<div class="h-10 rounded-sm bg-brand/50"></div>
+<div class="h-10 rounded-sm bg-brand/20"></div>
+<div class="h-10 rounded-sm bg-brand/05"></div>
+<div class="h-10 rounded-sm bg-brand/60"></div>
+<div class="h-10 rounded-sm bg-brand/80"></div>
+<div class="h-10 rounded-sm bg-brand/20"></div>
+<div class="h-10 rounded-sm bg-brand/40"></div>
+<div class="h-10 rounded-sm bg-brand/70"></div>
+<div class="h-10 rounded-sm bg-brand/10"></div>
+<div class="h-10 rounded-sm bg-brand/10"></div>
+<div class="h-10 rounded-sm bg-brand/90"></div>
+<div class="h-10 rounded-sm bg-brand/50"></div>
+<div class="h-10 rounded-sm bg-brand/40"></div>
+<div class="h-10 rounded-sm bg-brand/80"></div>
+<div class="h-10 rounded-sm bg-brand/30"></div>
+<div class="h-10 rounded-sm bg-brand/20"></div>
+<div class="h-10 rounded-sm bg-brand/10"></div>
+</div>
+<div class="mt-6 flex items-center gap-4">
+<div class="p-3 bg-white/5 rounded-custom flex-1">
+<p class="text-[10px] text-gray-500 uppercase font-bold mb-1">Peak Activity</p>
+<p class="text-sm font-semibold">Wednesday, 2:00 PM</p>
+</div>
+<div class="p-3 bg-white/5 rounded-custom flex-1">
+<p class="text-[10px] text-gray-500 uppercase font-bold mb-1">Avg Session</p>
+<p class="text-sm font-semibold">42 Minutes</p>
+</div>
+</div>
+</div>
+<!-- END: Student Engagement Heatmap UI -->
+</div>
+</main>
+<!-- END: Main Content Area -->
+</div>
+<script data-purpose="charts-initialization">
+    document.addEventListener('DOMContentLoaded', function() {
+      // Configuration for Performance Bar Chart
+      const ctxPerf = document.getElementById('performanceChart').getContext('2d');
+      const gradientCurrent = ctxPerf.createLinearGradient(0, 0, 0, 400);
+      gradientCurrent.addColorStop(0, '#0d33f2');
+      gradientCurrent.addColorStop(1, 'rgba(13, 51, 242, 0.1)');
+
+      new Chart(ctxPerf, {
+        type: 'bar',
+        data: {
+          labels: ['HW1', 'HW2', 'Quiz 1', 'Lab 1', 'Midterm', 'Lab 2', 'Quiz 2'],
+          datasets: [{
+            label: 'Current Year',
+            data: [82, 78, 85, 91, 74, 88, 84],
+            backgroundColor: gradientCurrent,
+            borderRadius: 6,
+            barThickness: 16,
+          }, {
+            label: 'Previous Year',
+            data: [75, 80, 78, 85, 70, 82, 79],
+            backgroundColor: 'rgba(255, 255, 255, 0.1)',
+            borderRadius: 6,
+            barThickness: 16,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              beginAtZero: true,
+              grid: { color: 'rgba(255,255,255,0.05)' },
+              ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } }
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } }
+            }
+          }
+        }
+      });
+
+      // Configuration for Predictive Area Chart
+      const ctxPred = document.getElementById('predictiveChart').getContext('2d');
+      const gradientPred = ctxPred.createLinearGradient(0, 0, 0, 250);
+      gradientPred.addColorStop(0, 'rgba(13, 51, 242, 0.4)');
+      gradientPred.addColorStop(1, 'rgba(13, 51, 242, 0)');
+
+      new Chart(ctxPred, {
+        type: 'line',
+        data: {
+          labels: ['Sep', 'Oct', 'Nov', 'Dec (Est)'],
+          datasets: [{
+            label: 'Estimated Performance',
+            data: [72, 78, 82, 85],
+            borderColor: '#0d33f2',
+            backgroundColor: gradientPred,
+            fill: true,
+            tension: 0.4,
+            pointBackgroundColor: '#0d33f2',
+            pointBorderColor: '#fff',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false }
+          },
+          scales: {
+            y: {
+              display: false,
+              beginAtZero: false
+            },
+            x: {
+              grid: { display: false },
+              ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } }
+            }
+          }
+        }
+      });
+    });
+  </script>
+</body></html>
