@@ -1,66 +1,30 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import {
-  Home, BarChart2, BookOpen, Clock,
-  Upload, User,
-  GraduationCap, Target
+  Home, BarChart2, BookOpen, Clock, Upload, User, GraduationCap, Target,
+  Sparkles, MessageCircle, X, Send, Trophy, Download, Activity,
+  TrendingUp, TrendingDown, AlertTriangle, Lightbulb, Shield, Brain,
+  FileText, Users, ChevronUp, ChevronDown, Minus, Award, Zap, Star
 } from 'lucide-react';
 import {
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
+  AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, Legend,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  LineChart, Line,
-  ScatterChart, Scatter, ZAxis
+  LineChart, Line, ScatterChart, Scatter, ZAxis
 } from 'recharts';
 
-type SubjectStats = {
-  subject: string;
-  mean: number;
-  median: number;
-  max: number;
-  min: number;
-};
-
-type ScoreDistribution = {
-  subject: string;
-  bins: string[];
-  counts: number[];
-};
-
-type StudentRisk = {
-  student_id: string;
-  name: string;
-  risk_score: number;
-  at_risk: boolean;
-};
-
-type PerformanceCluster = {
-  student_id: string;
-  name: string;
-  cluster: string;
-};
-
-type MarksWarning = {
-  student_id: string;
-  name: string;
-  marks: number;
-};
-
-type UserProfile = {
-  name: string;
-  role: string;
-  institution: string;
-}
+type SubjectStats = { subject: string; mean: number; median: number; max: number; min: number };
+type ScoreDistribution = { subject: string; bins: string[]; counts: number[] };
+type StudentRisk = { student_id: string; name: string; risk_score: number; at_risk: boolean };
+type PerformanceCluster = { student_id: string; name: string; cluster: string };
+type MarksWarning = { student_id: string; name: string; marks: number };
+type UserProfile = { name: string; role: string; institution: string };
+type StudentRanking = { rank: number; student_id: string; name: string; average_score: number; gpa: number; percentile: number; trend: string };
+type ClassHealth = { overall_score: number; pass_rate: number; engagement_score: number; improvement_rate: number; avg_gpa: number; grade: string };
+type AIInsight = { category: string; title: string; description: string; priority: string };
+type ChatMsg = { role: 'user' | 'assistant'; content: string };
+type ToastItem = { id: number; message: string; type: 'success' | 'error' | 'info' };
 
 type DashboardData = {
   overall_students_analyzed: number;
@@ -74,9 +38,43 @@ type DashboardData = {
   correlation_analysis: { student_id: string; attendance: number; marks: number }[];
   cohort_migration: { term: string; top_performer: number; average: number; at_risk: number }[];
   user_profile: UserProfile;
+  student_rankings: StudentRanking[];
+  class_health: ClassHealth | null;
+  subject_difficulty: { subject: string; difficulty_index: number; fail_rate: number; spread: number }[];
 };
 
-type TabView = 'home' | 'insights' | 'subjects' | 'interventions' | 'calendar' | 'settings' | 'profile';
+type TabView = 'home' | 'insights' | 'subjects' | 'interventions' | 'students' | 'profile';
+
+function AnimCounter({ value, suffix = '' }: { value: number; suffix?: string }) {
+  const [display, setDisplay] = useState(0);
+  useEffect(() => {
+    let cur = 0;
+    const step = value / 60;
+    const t = setInterval(() => {
+      cur += step;
+      if (cur >= value) { setDisplay(value); clearInterval(t); }
+      else setDisplay(Math.round(cur * 10) / 10);
+    }, 16);
+    return () => clearInterval(t);
+  }, [value]);
+  return <>{Number.isInteger(value) ? Math.round(display) : display.toFixed(1)}{suffix}</>;
+}
+
+function Toasts({ items, onDismiss }: { items: ToastItem[]; onDismiss: (id: number) => void }) {
+  useEffect(() => {
+    items.forEach(t => { setTimeout(() => onDismiss(t.id), 4000); });
+  }, [items]);
+  return (
+    <div className="toast-container">
+      {items.map(t => (
+        <div key={t.id} className={`toast ${t.type}`} onClick={() => onDismiss(t.id)}>
+          {t.type === 'success' ? <Shield size={16} /> : t.type === 'error' ? <AlertTriangle size={16} /> : <Sparkles size={16} />}
+          {t.message}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 function App() {
   const [data, setData] = useState<DashboardData | null>(null);
@@ -85,304 +83,513 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabView>('home');
   const [sentWarnings, setSentWarnings] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Login State
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
+  const [aiInsights, setAiInsights] = useState<{ summary: string; insights: AIInsight[] } | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
+    { role: 'assistant', content: 'Hey! I\'m your AI Academic Advisor. Load some data and ask me anything about student performance!' }
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+
+  const toast = useCallback((message: string, type: ToastItem['type'] = 'info') => {
+    setToasts(prev => [...prev, { id: Date.now(), message, type }]);
+  }, []);
+  const dismissToast = useCallback((id: number) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => { if (data) fetchInsights(); }, [data]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email && password) {
-      setIsLoggedIn(true);
-    }
+    if (email && password) setIsLoggedIn(true);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    if (!file.name.endsWith('.csv')) {
-      setError("Please upload a CSV file.");
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    const formData = new FormData();
-    formData.append('file', file);
-
+    if (!file.name.endsWith('.csv')) { setError('Please upload a CSV file.'); return; }
+    setLoading(true); setError(null);
+    const fd = new FormData(); fd.append('file', file);
     try {
-      const response = await fetch('http://localhost:8000/upload', {
-        method: 'POST',
-        body: formData,
-      });
+      const res = await fetch('http://localhost:8000/upload', { method: 'POST', body: fd });
+      if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
+      const result = await res.json();
+      setData(result);
+      toast(`Analyzed ${result.overall_students_analyzed} students!`, 'success');
+    } catch (err: any) { setError(err.message); toast(err.message, 'error'); }
+    finally { setLoading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
+  };
 
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || 'Failed to analyze data');
+  const loadDemo = async () => {
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch('http://localhost:8000/demo');
+      if (!res.ok) throw new Error('Failed to load demo data');
+      setData(await res.json());
+      toast('Demo data loaded!', 'success');
+    } catch (err: any) { setError(err.message); toast(err.message, 'error'); }
+    finally { setLoading(false); }
+  };
+
+  const fetchInsights = async () => {
+    setAiLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/ai/insights', { method: 'POST' });
+      if (res.ok) setAiInsights(await res.json());
+    } catch { } finally { setAiLoading(false); }
+  };
+
+  const sendChat = async () => {
+    if (!chatInput.trim() || chatLoading) return;
+    const msg = chatInput.trim(); setChatInput('');
+    setChatMessages(p => [...p, { role: 'user', content: msg }]);
+    setChatLoading(true);
+    try {
+      const res = await fetch('http://localhost:8000/ai/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: msg, chat_history: chatMessages })
+      });
+      if (res.ok) { const r = await res.json(); setChatMessages(p => [...p, { role: 'assistant', content: r.response }]); }
+      else setChatMessages(p => [...p, { role: 'assistant', content: 'Something went wrong.' }]);
+    } catch { setChatMessages(p => [...p, { role: 'assistant', content: 'Cannot reach AI service.' }]); }
+    finally { setChatLoading(false); }
+  };
+
+  const downloadReport = async () => {
+    if (!data) { toast('Load data first', 'error'); return; }
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pw = doc.internal.pageSize.getWidth();
+      const primaryBlue = [37, 99, 235];
+      const darkBg = [15, 18, 35];
+      let yPos = 0;
+
+      // --- COVER HEADER ---
+      doc.setFillColor(darkBg[0], darkBg[1], darkBg[2]);
+      doc.rect(0, 0, pw, 55, 'F');
+      doc.setFillColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
+      doc.rect(0, 52, pw, 3, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(22);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Academic Performance Report', pw / 2, 22, { align: 'center' });
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`AcademiQ Analytics  •  Generated ${new Date().toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}`, pw / 2, 34, { align: 'center' });
+      doc.text(`Prepared for: ${data.user_profile?.name || 'Instructor'}`, pw / 2, 42, { align: 'center' });
+      yPos = 65;
+
+      // --- EXECUTIVE SUMMARY ---
+      doc.setTextColor(30, 30, 60);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Executive Summary', 14, yPos); yPos += 8;
+      doc.setDrawColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
+      doc.setLineWidth(0.5);
+      doc.line(14, yPos - 3, 80, yPos - 3);
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(50, 50, 70);
+      const classAvg = data.subject_stats.length > 0 ? data.subject_stats.reduce((a, c) => a + c.mean, 0) / data.subject_stats.length : 0;
+      const summaryLines = [
+        `Total Students Enrolled: ${data.overall_students_analyzed}`,
+        `Class Average Score: ${classAvg.toFixed(1)}%`,
+        `Class Health Score: ${data.class_health?.overall_score || '--'}/100 (Grade: ${data.class_health?.grade || '--'})`,
+        `Students At-Risk: ${data.at_risk_students.length}`,
+        `Subjects Analyzed: ${data.subject_stats.length}`
+      ];
+      summaryLines.forEach(line => { doc.text(line, 18, yPos); yPos += 6; });
+      yPos += 6;
+
+      // --- SUBJECT PERFORMANCE TABLE ---
+      doc.setTextColor(30, 30, 60);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Subject Performance Breakdown', 14, yPos); yPos += 4;
+      doc.setDrawColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
+      doc.line(14, yPos, 110, yPos); yPos += 4;
+
+      const subjectRows = data.subject_stats.map((s: any) => [
+        s.subject,
+        `${s.mean.toFixed(1)}%`,
+        s.max?.toString() || '--',
+        s.min?.toString() || '--',
+        data.class_health?.pass_rate ? `${data.class_health.pass_rate.toFixed(0)}%` : '--'
+      ]);
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Subject', 'Average', 'Highest', 'Lowest', 'Pass Rate']],
+        body: subjectRows,
+        theme: 'striped',
+        headStyles: { fillColor: [primaryBlue[0], primaryBlue[1], primaryBlue[2]], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: [40, 40, 60] },
+        alternateRowStyles: { fillColor: [240, 243, 255] },
+        margin: { left: 14, right: 14 }
+      });
+      yPos = (doc as any).lastAutoTable.finalY + 12;
+
+      // --- STUDENT RANKINGS TABLE ---
+      if (yPos > 230) { doc.addPage(); yPos = 20; }
+      doc.setTextColor(30, 30, 60);
+      doc.setFontSize(14);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Student Rankings', 14, yPos); yPos += 4;
+      doc.setDrawColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
+      doc.line(14, yPos, 70, yPos); yPos += 4;
+
+      const studentRows = (data.student_rankings || []).map((s: any, idx: number) => [
+        (idx + 1).toString(),
+        s.name,
+        s.gpa?.toFixed(2) || '--',
+        `${s.average_score.toFixed(1)}%`,
+        `${s.percentile}th`,
+        s.trend || '--'
+      ]);
+      autoTable(doc, {
+        startY: yPos,
+        head: [['Rank', 'Student', 'GPA', 'Avg', 'Percentile', 'Trend']],
+        body: studentRows,
+        theme: 'striped',
+        headStyles: { fillColor: [primaryBlue[0], primaryBlue[1], primaryBlue[2]], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+        bodyStyles: { fontSize: 9, textColor: [40, 40, 60] },
+        alternateRowStyles: { fillColor: [240, 243, 255] },
+        margin: { left: 14, right: 14 }
+      });
+      yPos = (doc as any).lastAutoTable.finalY + 12;
+
+      // --- AT-RISK STUDENTS ---
+      if (data.at_risk_students.length > 0) {
+        if (yPos > 240) { doc.addPage(); yPos = 20; }
+        doc.setTextColor(200, 40, 40);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('⚠ At-Risk Students — Immediate Action Required', 14, yPos); yPos += 4;
+        doc.setDrawColor(200, 40, 40);
+        doc.line(14, yPos, 130, yPos); yPos += 4;
+
+        const riskRows = data.at_risk_students.map((s: any) => [
+          s.name,
+          typeof s.risk_score === 'number' ? s.risk_score.toFixed(2) : s.risk_score,
+          s.average ? `${s.average.toFixed(1)}%` : '--',
+          'Schedule parent meeting; assign peer tutor'
+        ]);
+        autoTable(doc, {
+          startY: yPos,
+          head: [['Student', 'Z-Score', 'Average', 'Recommended Action']],
+          body: riskRows,
+          theme: 'striped',
+          headStyles: { fillColor: [200, 40, 40], textColor: 255, fontStyle: 'bold', fontSize: 9 },
+          bodyStyles: { fontSize: 9, textColor: [40, 40, 60] },
+          margin: { left: 14, right: 14 }
+        });
+        yPos = (doc as any).lastAutoTable.finalY + 12;
       }
 
-      const result = await response.json();
-      setData(result);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+      // --- AI INSIGHTS SECTION ---
+      const insightsList = aiInsights?.insights || [];
+      if (insightsList.length > 0) {
+        if (yPos > 220) { doc.addPage(); yPos = 20; }
+        doc.setTextColor(30, 30, 60);
+        doc.setFontSize(14);
+        doc.setFont('helvetica', 'bold');
+        doc.text('AI-Generated Insights', 14, yPos); yPos += 4;
+        doc.setDrawColor(primaryBlue[0], primaryBlue[1], primaryBlue[2]);
+        doc.line(14, yPos, 85, yPos); yPos += 6;
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(50, 50, 70);
+        insightsList.forEach((ins: any) => {
+          if (yPos > 270) { doc.addPage(); yPos = 20; }
+          const tag = `[${(ins.category || 'insight').toUpperCase()}]`;
+          doc.setFont('helvetica', 'bold');
+          doc.text(`${tag}  ${ins.title}`, 18, yPos); yPos += 5;
+          doc.setFont('helvetica', 'normal');
+          const wrapped = doc.splitTextToSize(ins.description, pw - 36);
+          doc.text(wrapped, 18, yPos);
+          yPos += wrapped.length * 4.5 + 4;
+        });
+      }
 
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+      // --- FOOTER ---
+      const pages = doc.getNumberOfPages();
+      for (let p = 1; p <= pages; p++) {
+        doc.setPage(p);
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 170);
+        doc.text(`AcademiQ Analytics  •  Confidential  •  Page ${p} of ${pages}`, pw / 2, 290, { align: 'center' });
+      }
+
+      doc.save(`Academic_Report_${new Date().toISOString().slice(0, 10)}.pdf`);
+      toast('PDF report downloaded!', 'success');
+    } catch (err) {
+      console.error('PDF generation error:', err);
+      toast('Report generation failed', 'error');
     }
   };
 
-  const formattedChartData = data?.score_distributions.map(dist => {
-    return dist.bins.map((bin, index) => ({
-      name: bin,
-      count: dist.counts[index],
-      subject: dist.subject
-    }));
-  }) || [];
+  const insightStyle = (cat: string) => {
+    const m: Record<string, { bg: string; color: string }> = {
+      strength: { bg: 'rgba(16,185,129,0.12)', color: 'var(--color-green)' },
+      weakness: { bg: 'rgba(239,68,68,0.12)', color: 'var(--color-red)' },
+      opportunity: { bg: 'rgba(37,99,235,0.12)', color: 'var(--brand-blue-light)' },
+      warning: { bg: 'rgba(245,158,11,0.12)', color: 'var(--color-orange)' },
+      trend: { bg: 'rgba(139,92,246,0.12)', color: 'var(--color-purple)' },
+      recommendation: { bg: 'rgba(6,182,212,0.12)', color: 'var(--color-cyan)' }
+    };
+    return m[cat] || { bg: 'rgba(255,255,255,0.06)', color: 'var(--text-primary)' };
+  };
+  const insightIcon = (cat: string) => {
+    const m: Record<string, React.ReactNode> = {
+      strength: <TrendingUp size={14} />, weakness: <TrendingDown size={14} />,
+      opportunity: <Lightbulb size={14} />, warning: <AlertTriangle size={14} />,
+      trend: <Activity size={14} />, recommendation: <Target size={14} />
+    };
+    return m[cat] || <Sparkles size={14} />;
+  };
+
+  const chartData = data?.score_distributions.map(d => d.bins.map((b, i) => ({ name: b, count: d.counts[i], subject: d.subject }))) || [];
 
   if (!isLoggedIn) {
     return (
-      <div className="app-container" style={{ justifyContent: 'center', alignItems: 'center' }}>
-        <div className="glass-card" style={{ padding: '40px', width: '100%', maxWidth: '400px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <div className="login-container">
+        <div className="login-bg" />
+        <div className="animated-bg" />
+        <div className="glass-card login-card">
           <div style={{ textAlign: 'center' }}>
-            <GraduationCap size={48} color="var(--brand-blue)" style={{ margin: '0 auto 16px auto' }} />
-            <h1 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>Academic Dashboard</h1>
-            <p style={{ color: 'var(--text-secondary)' }}>Sign in to continue</p>
+            <div style={{ width: 56, height: 56, borderRadius: 14, background: 'var(--brand-gradient)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 30px rgba(37,99,235,0.3)' }}>
+              <GraduationCap size={28} color="white" />
+            </div>
+            <h1 style={{ fontSize: '1.6rem', marginBottom: 6 }}>Academic Dashboard</h1>
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>AI-Powered Performance Analytics</p>
           </div>
-          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <div>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-                required
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
-              />
+              <label style={{ display: 'block', marginBottom: 6, fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="you@institution.edu" />
             </div>
             <div>
-              <label style={{ display: 'block', marginBottom: '8px', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                required
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid var(--panel-border)', background: 'rgba(0,0,0,0.2)', color: 'white', outline: 'none' }}
-              />
+              <label style={{ display: 'block', marginBottom: 6, fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>Password</label>
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)} required placeholder="Enter password" />
             </div>
-            <button type="submit" className="btn-upload" style={{ width: '100%', justifyContent: 'center', marginTop: '8px', background: 'var(--brand-blue)', color: 'white', border: 'none' }}>
+            <button type="submit" className="btn-gradient" style={{ width: '100%', justifyContent: 'center', padding: '12px 24px', marginTop: 4 }}>
               Sign In
             </button>
           </form>
+          <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Powered by Gemini AI</p>
         </div>
       </div>
     );
   }
 
+  const healthColor = (s: number) => s >= 80 ? 'var(--color-green)' : s >= 60 ? 'var(--color-orange)' : 'var(--color-red)';
+
   return (
-    <div className="app-container">
-      {/* 1. LEFT SIDEBAR */}
-      <nav className="sidebar">
-        <div className="sidebar-logo">
-          <GraduationCap size={32} />
-        </div>
-        <div className={`nav-icon ${activeTab === 'home' ? 'active' : ''}`} onClick={() => setActiveTab('home')} title="Overview Dashboard">
-          <Home size={22} />
-          <span className="nav-label">Overview</span>
-        </div>
-        <div className={`nav-icon ${activeTab === 'insights' ? 'active' : ''}`} onClick={() => setActiveTab('insights')} title="Statistical Insights">
-          <BarChart2 size={22} />
-          <span className="nav-label">Insights</span>
-        </div>
-        <div className={`nav-icon ${activeTab === 'subjects' ? 'active' : ''}`} onClick={() => setActiveTab('subjects')} title="Subject Breakdowns">
-          <BookOpen size={22} />
-          <span className="nav-label">Subjects</span>
-        </div>
-        <div className={`nav-icon ${activeTab === 'interventions' ? 'active' : ''}`} onClick={() => setActiveTab('interventions')} title="Critical Interventions">
-          <Clock size={22} />
-          <span className="nav-label">Interventions</span>
-        </div>
+    <>
+      <div className="animated-bg" />
+      <div className="app-container">
+        <Toasts items={toasts} onDismiss={dismissToast} />
 
-        <div className="sidebar-spacer"></div>
-
-        <div className={`nav-icon ${activeTab === 'profile' ? 'active' : ''}`} style={{ marginBottom: '16px' }} onClick={() => setActiveTab('profile')} title="User Profile">
-          <User size={22} />
-          <span className="nav-label">Profile</span>
-        </div>
-      </nav>
-
-      {/* 2. MAIN CONTENT AREA */}
-      <main className="main-content">
-        <header className="header">
-          <h1>
-            {activeTab === 'home' && 'Analytics Overview'}
-            {activeTab === 'insights' && 'Statistical Insights'}
-            {activeTab === 'subjects' && 'Subject Breakdowns'}
-            {activeTab === 'interventions' && 'Interventions Menu'}
-            {['calendar', 'settings', 'profile'].includes(activeTab) && 'Configuration'}
-          </h1>
-
-          <div>
-            <input
-              type="file"
-              accept=".csv"
-              ref={fileInputRef}
-              onChange={handleFileUpload}
-              className="file-input-hidden"
-            />
-            <button
-              className="btn-upload"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={loading}
-            >
-              <Upload size={18} />
-              {loading ? 'Analyzing...' : 'Upload CSV'}
-            </button>
+        {/* SIDEBAR */}
+        <nav className="sidebar">
+          <div className="sidebar-logo">
+            <div className="logo-icon"><GraduationCap size={20} /></div>
+            <div>
+              <div className="logo-text">AcademiQ</div>
+              <div className="logo-sub">Analytics</div>
+            </div>
           </div>
-        </header>
-
-        {error && (
-          <div style={{ color: 'var(--color-red)', background: '#ef444420', padding: '16px', borderRadius: '8px' }}>
-            {error}
+          {([
+            { id: 'home' as TabView, icon: <Home size={18} />, label: 'Overview' },
+            { id: 'insights' as TabView, icon: <BarChart2 size={18} />, label: 'Insights' },
+            { id: 'subjects' as TabView, icon: <BookOpen size={18} />, label: 'Subjects' },
+            { id: 'students' as TabView, icon: <Users size={18} />, label: 'Students' },
+            { id: 'interventions' as TabView, icon: <AlertTriangle size={18} />, label: 'Interventions' },
+          ]).map(tab => (
+            <div key={tab.id} className={`nav-icon ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+              {tab.icon}<span className="nav-label">{tab.label}</span>
+            </div>
+          ))}
+          <div className="sidebar-spacer" />
+          <div className="sidebar-divider" />
+          <div className={`nav-icon ${activeTab === 'profile' ? 'active' : ''}`} onClick={() => setActiveTab('profile')}>
+            <User size={18} /><span className="nav-label">Profile</span>
           </div>
-        )}
+        </nav>
 
-        {!data && !loading && !error && activeTab !== 'profile' && (
-          <div className="center-message">
-            <Target size={48} style={{ opacity: 0.5 }} />
-            <h2>No Data Loaded</h2>
-            <p>Please upload your CSV to see the academic progress overview.</p>
-          </div>
-        )}
+        {/* MAIN */}
+        <main className="main-content">
+          <header className="header">
+            <h1>
+              {activeTab === 'home' && 'Analytics Overview'}
+              {activeTab === 'insights' && 'Statistical Insights'}
+              {activeTab === 'subjects' && 'Subject Breakdowns'}
+              {activeTab === 'students' && 'Student Leaderboard'}
+              {activeTab === 'interventions' && 'Interventions'}
+              {activeTab === 'profile' && 'My Profile'}
+            </h1>
+            <div className="header-actions">
+              {data && <button className="btn-secondary" onClick={downloadReport}><Download size={16} />Report</button>}
+              <button className="btn-secondary" onClick={loadDemo} disabled={loading}><Zap size={16} />Demo</button>
+              <input type="file" accept=".csv" ref={fileInputRef} onChange={handleUpload} className="file-input-hidden" />
+              <button className="btn-upload" onClick={() => fileInputRef.current?.click()} disabled={loading}>
+                <Upload size={16} />{loading ? 'Analyzing...' : 'Upload CSV'}
+              </button>
+            </div>
+          </header>
 
-        {data && activeTab === 'home' && (
-          <>
-            {/* TOP METRICS ROW */}
-            <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gap: '24px', marginBottom: '32px' }}>
+          {error && <div style={{ color: 'var(--color-red)', background: 'rgba(239,68,68,0.1)', padding: 14, borderRadius: 10, marginBottom: 16, fontSize: '0.9rem' }}>{error}</div>}
 
-              {/* Class Average */}
-              <div className="overview-card" style={{ padding: '24px', justifyContent: 'center', gap: '8px' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>Class Avg.</p>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <h3 style={{ fontSize: '2rem', fontWeight: 700, margin: 0 }}>
-                    {(data.subject_stats.reduce((acc, curr) => acc + curr.mean, 0) / data.subject_stats.length).toFixed(1)}%
+          {!data && !loading && !error && activeTab !== 'profile' && (
+            <div className="center-message">
+              <div style={{ width: 80, height: 80, borderRadius: '50%', background: 'rgba(37,99,235,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                <Brain size={36} style={{ color: 'var(--brand-blue)', opacity: 0.7 }} />
+              </div>
+              <h2 style={{ fontSize: '1.3rem' }}>Ready for Analysis</h2>
+              <p style={{ maxWidth: 400 }}>Upload a CSV file or load demo data to see AI-powered academic insights.</p>
+              <button className="btn-gradient" onClick={loadDemo} style={{ marginTop: 8 }}><Zap size={16} />Load Demo Data</button>
+            </div>
+          )}
+
+          {data && activeTab === 'home' && (<>
+            {/* METRICS ROW */}
+            <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(4,1fr)', gap: 16, marginBottom: 24 }}>
+              <div className="overview-card" style={{ padding: 20 }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 500, margin: 0 }}>Class Average</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <h3 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}>
+                    <AnimCounter value={parseFloat((data.subject_stats.reduce((a, c) => a + c.mean, 0) / data.subject_stats.length).toFixed(1))} suffix="%" />
                   </h3>
-                  <span style={{ color: 'var(--color-green)', fontSize: '0.8rem', fontWeight: 600 }}>+2.4%</span>
+                  <span style={{ color: 'var(--color-green)', fontSize: '0.75rem', fontWeight: 600 }}>+2.4%</span>
                 </div>
-                <div style={{ width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', height: '4px', borderRadius: '4px', marginTop: '8px', overflow: 'hidden' }}>
-                  <div style={{ backgroundColor: 'var(--brand-blue)', height: '100%', width: '84%', boxShadow: 'var(--neon-glow-blue)' }}></div>
-                </div>
-              </div>
-
-              {/* Attendance (Mocked) */}
-              <div className="overview-card" style={{ padding: '24px', justifyContent: 'center', gap: '8px' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>Attendance</p>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <h3 style={{ fontSize: '2rem', fontWeight: 700, margin: 0 }}>92.0%</h3>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 600 }}>Stable</span>
-                </div>
-                <div style={{ width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', height: '4px', borderRadius: '4px', marginTop: '8px', overflow: 'hidden' }}>
-                  <div style={{ backgroundColor: 'var(--color-green)', height: '100%', width: '92%', boxShadow: '0 0 10px rgba(16, 185, 129, 0.4)' }}></div>
+                <div style={{ width: '100%', background: 'rgba(255,255,255,0.04)', height: 3, borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ background: 'var(--brand-blue)', height: '100%', width: '84%' }} />
                 </div>
               </div>
-
-              {/* Submissions (Mocked) */}
-              <div className="overview-card" style={{ padding: '24px', justifyContent: 'center', gap: '8px' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>Submissions</p>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px', minWidth: 0, overflow: 'hidden' }}>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
-                    {(data.overall_students_analyzed * data.subject_stats.length * 3 - 4).toLocaleString()}/{(data.overall_students_analyzed * data.subject_stats.length * 3).toLocaleString()}
+              <div className="overview-card" style={{ padding: 20 }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 500, margin: 0 }}>Students</p>
+                <h3 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0 }}><AnimCounter value={data.overall_students_analyzed} /></h3>
+                <div style={{ width: '100%', background: 'rgba(255,255,255,0.04)', height: 3, borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ background: 'var(--color-green)', height: '100%', width: '100%' }} />
+                </div>
+              </div>
+              <div className="overview-card" style={{ padding: 20 }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 500, margin: 0 }}>Class Health</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <h3 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, color: healthColor(data.class_health?.overall_score || 0) }}>
+                    {data.class_health?.grade || '--'}
                   </h3>
-                  <span style={{ color: 'var(--color-orange)', fontSize: '0.8rem', fontWeight: 600, flexShrink: 0 }}>4 Pending</span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{data.class_health?.overall_score || 0}/100</span>
                 </div>
-                <div style={{ width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', height: '4px', borderRadius: '4px', marginTop: '8px', overflow: 'hidden' }}>
-                  <div style={{ backgroundColor: 'var(--color-orange)', height: '100%', width: '92%', boxShadow: '0 0 10px rgba(245, 158, 11, 0.4)' }}></div>
+                <div style={{ width: '100%', background: 'rgba(255,255,255,0.04)', height: 3, borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ background: healthColor(data.class_health?.overall_score || 0), height: '100%', width: `${data.class_health?.overall_score || 0}%` }} />
                 </div>
               </div>
-
-              {/* At-Risk */}
-              <div className="overview-card" style={{ padding: '24px', justifyContent: 'center', gap: '8px', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', fontWeight: 500, margin: 0 }}>At-Risk Students</p>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-                  <h3 style={{ fontSize: '2rem', fontWeight: 700, margin: 0, color: 'var(--color-red)' }}>
-                    {data.at_risk_students.length.toString().padStart(2, '0')}
+              <div className="overview-card" style={{ padding: 20, borderColor: data.at_risk_students.length > 0 ? 'rgba(239,68,68,0.2)' : 'transparent' }}>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', fontWeight: 500, margin: 0 }}>At-Risk</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                  <h3 style={{ fontSize: '1.8rem', fontWeight: 700, margin: 0, color: data.at_risk_students.length > 0 ? 'var(--color-red)' : 'var(--color-green)' }}>
+                    <AnimCounter value={data.at_risk_students.length} />
                   </h3>
-                  {data.at_risk_students.length > 0 && <span style={{ color: 'var(--color-red)', fontSize: '0.8rem', fontWeight: 600 }}>Action Required</span>}
+                  {data.at_risk_students.length > 0 && <span style={{ color: 'var(--color-red)', fontSize: '0.75rem', fontWeight: 600 }}>Action Needed</span>}
                 </div>
-                <div style={{ width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', height: '4px', borderRadius: '4px', marginTop: '8px', overflow: 'hidden' }}>
-                  <div style={{ backgroundColor: 'var(--color-red)', height: '100%', width: '15%', boxShadow: 'var(--neon-glow-red)' }}></div>
+                <div style={{ width: '100%', background: 'rgba(255,255,255,0.04)', height: 3, borderRadius: 3, overflow: 'hidden', marginTop: 4 }}>
+                  <div style={{ background: 'var(--color-red)', height: '100%', width: `${Math.min(100, data.at_risk_students.length * 25)}%` }} />
                 </div>
               </div>
-
             </div>
 
-            {/* PERFORMANCE CHART ROW (Phase 3) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '24px', marginBottom: '32px' }}>
-              <div className="glass-card" style={{ gridColumn: 'span 2', padding: '24px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-                  <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Mark Distribution (Current vs Previous)</h2>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--brand-blue)', marginRight: '4px' }}></span> Current
+            {/* AI INSIGHTS */}
+            <div className="ai-insights-card" style={{ marginBottom: 24 }}>
+              <div className="ai-insights-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <h2 style={{ fontSize: '1.05rem', fontWeight: 600, margin: 0 }}>AI Insights</h2>
+                  <span className="ai-badge"><Sparkles size={10} />AI Powered</span>
+                </div>
+                <button className="btn-secondary" style={{ padding: '6px 12px', fontSize: '0.75rem' }} onClick={fetchInsights}>Refresh</button>
+              </div>
+              {aiLoading ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {[1, 2, 3].map(i => <div key={i} className="skeleton" style={{ height: 60, borderRadius: 10 }} />)}
+                </div>
+              ) : aiInsights ? (<>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.5 }}>{aiInsights.summary}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 8 }}>
+                  {aiInsights.insights.map((ins, i) => {
+                    const s = insightStyle(ins.category);
+                    return (
+                      <div key={i} className="insight-item" style={{ animationDelay: `${i * 0.05}s` }}>
+                        <div className="insight-icon" style={{ background: s.bg, color: s.color }}>{insightIcon(ins.category)}</div>
+                        <div className="insight-content">
+                          <h4 style={{ color: s.color }}>{ins.title}</h4>
+                          <p>{ins.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>) : <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Click refresh to generate insights.</p>}
+            </div>
+
+            {/* CHARTS ROW */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 20, marginBottom: 24 }}>
+              <div className="glass-card" style={{ padding: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Performance by Subject</h2>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--brand-blue)', marginRight: 4 }} /> Mean
                     </span>
-                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                      <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#4b5563', marginRight: '4px' }}></span> Previous
+                    <span style={{ display: 'flex', alignItems: 'center', fontSize: '0.7rem', color: 'var(--text-secondary)' }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255,255,255,0.15)', marginRight: 4 }} /> Median
                     </span>
                   </div>
                 </div>
-                <div style={{ height: '320px', width: '100%' }}>
+                <div style={{ height: 280 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data.subject_stats}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="subject" stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                        itemStyle={{ color: 'var(--text-primary)' }}
-                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                      />
-                      <Bar dataKey="mean" fill="var(--brand-blue)" radius={[6, 6, 6, 6]} barSize={16} name="Current Year" />
-                      <Bar dataKey="median" fill="rgba(255, 255, 255, 0.1)" radius={[6, 6, 6, 6]} barSize={16} name="Previous Year (Est.)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="subject" stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} cursor={{ fill: 'rgba(255,255,255,0.03)' }} />
+                      <Bar dataKey="mean" fill="var(--brand-blue)" radius={[6, 6, 6, 6]} barSize={14} name="Mean" />
+                      <Bar dataKey="median" fill="rgba(255,255,255,0.08)" radius={[6, 6, 6, 6]} barSize={14} name="Median" />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
 
-              {/* TOP PERFORMER SKILL PROFILE (Radar Chart) */}
-              <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Top Student Profile</h2>
-                  <span style={{ backgroundColor: 'rgba(34, 197, 94, 0.2)', color: 'var(--color-green)', padding: '4px 8px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: 600 }}>Skill Web</span>
+              <div className="glass-card" style={{ padding: 20, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Skill Profile</h2>
+                  <span style={{ background: 'rgba(34,197,94,0.15)', color: 'var(--color-green)', padding: '3px 8px', borderRadius: 10, fontSize: '0.7rem', fontWeight: 600 }}>Top Student</span>
                 </div>
-                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <div style={{ flex: 1, minHeight: 0 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     {data.student_skill_profile.length < 3 ? (
-                      <BarChart data={data.student_skill_profile} margin={{ top: 20, right: 30, left: -20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                        <XAxis dataKey="subject" stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                          itemStyle={{ color: 'var(--text-primary)' }}
-                          cursor={{ fill: 'rgba(255,255,255,0.05)' }}
-                        />
-                        <Bar dataKey="score" fill="var(--brand-blue)" radius={[6, 6, 6, 6]} barSize={24} name="Student Score" />
+                      <BarChart data={data.student_skill_profile} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                        <XAxis dataKey="subject" stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                        <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
+                        <Bar dataKey="score" fill="var(--brand-blue)" radius={[6, 6, 6, 6]} barSize={20} name="Score" />
                       </BarChart>
                     ) : (
                       <RadarChart cx="50%" cy="50%" outerRadius="70%" data={data.student_skill_profile}>
-                        <PolarGrid stroke="rgba(255,255,255,0.1)" />
-                        <PolarAngleAxis dataKey="subject" tick={{ fill: 'rgba(255,255,255,0.7)', fontSize: 10 }} />
-                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} />
-                        <Radar name="Student" dataKey="score" stroke="var(--brand-blue)" fill="var(--brand-blue)" fillOpacity={0.5} />
-                        <Tooltip
-                          contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                          itemStyle={{ color: 'var(--text-primary)' }}
-                        />
+                        <PolarGrid stroke="rgba(255,255,255,0.08)" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: 'rgba(255,255,255,0.6)', fontSize: 10 }} />
+                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'rgba(255,255,255,0.3)', fontSize: 9 }} axisLine={false} />
+                        <Radar name="Score" dataKey="score" stroke="var(--brand-blue)" fill="var(--brand-blue)" fillOpacity={0.4} />
+                        <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
                       </RadarChart>
                     )}
                   </ResponsiveContainer>
@@ -390,102 +597,86 @@ function App() {
               </div>
             </div>
 
-            {/* PREDICTIVE TREND & HEATMAP ROW (Phase 3) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '24px', paddingBottom: '32px' }}>
-
-              {/* Predictive Grade Trend */}
-              <div className="glass-card" style={{ padding: '24px' }}>
-                <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: '0 0 24px 0' }}>Term-over-Term Progression</h2>
-                <div style={{ height: '256px', width: '100%' }}>
+            {/* TREND + COHORT */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+              <div className="glass-card" style={{ padding: 20 }}>
+                <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 16px' }}>Term Progression</h2>
+                <div style={{ height: 240 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={data.term_progression}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="term" stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                        itemStyle={{ color: 'var(--text-primary)' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '12px' }} />
-                      <Line type="monotone" dataKey="top_performer_average" name="Top Performers" stroke="var(--color-green)" strokeWidth={3} dot={{ r: 4, fill: 'var(--color-green)' }} />
-                      <Line type="monotone" dataKey="class_average" name="Class Average" stroke="var(--brand-blue)" strokeWidth={3} dot={{ r: 4, fill: 'var(--brand-blue)' }} />
-                      <Line type="monotone" dataKey="at_risk_average" name="At-Risk" stroke="var(--color-red)" strokeWidth={3} dot={{ r: 4, fill: 'var(--color-red)' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="term" stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis domain={[0, 100]} stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
+                      <Line type="monotone" dataKey="top_performer_average" name="Top" stroke="var(--color-green)" strokeWidth={2} dot={{ r: 3, fill: 'var(--color-green)' }} />
+                      <Line type="monotone" dataKey="class_average" name="Class Avg" stroke="var(--brand-blue)" strokeWidth={2} dot={{ r: 3, fill: 'var(--brand-blue)' }} />
+                      <Line type="monotone" dataKey="at_risk_average" name="At-Risk" stroke="var(--color-red)" strokeWidth={2} dot={{ r: 3, fill: 'var(--color-red)' }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
               </div>
-
-              {/* Cohort Migration (Stacked Bar Chart) */}
-              <div className="glass-card" style={{ padding: '24px' }}>
-                <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: '0 0 24px 0' }}>Cohort Migration</h2>
-                <div style={{ height: '256px', width: '100%' }}>
+              <div className="glass-card" style={{ padding: 20 }}>
+                <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: '0 0 16px' }}>Cohort Migration</h2>
+                <div style={{ height: 240 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={data.cohort_migration}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                      <XAxis dataKey="term" stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <YAxis stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={false} tickLine={false} />
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                        itemStyle={{ color: 'var(--text-primary)' }}
-                      />
-                      <Legend wrapperStyle={{ fontSize: '12px' }} />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                      <XAxis dataKey="term" stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <YAxis stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={false} tickLine={false} />
+                      <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
+                      <Legend wrapperStyle={{ fontSize: '11px' }} />
                       <Bar dataKey="at_risk" name="At Risk" stackId="a" fill="var(--color-red)" />
                       <Bar dataKey="average" name="Average" stackId="a" fill="var(--brand-blue)" />
-                      <Bar dataKey="top_performer" name="Top Performer" stackId="a" fill="var(--color-green)" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="top_performer" name="Top" stackId="a" fill="var(--color-green)" radius={[4, 4, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </div>
+            </div>
 
-              <div style={{ marginTop: '24px', display: 'flex', gap: '16px' }}>
-                <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '12px', flex: 1 }}>
-                  <p style={{ fontSize: '0.625rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px 0' }}>Peak Activity</p>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, margin: 0 }}>Wednesday, 2:00 PM</p>
-                </div>
-                <div style={{ padding: '12px', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: '12px', flex: 1 }}>
-                  <p style={{ fontSize: '0.625rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px 0' }}>Avg Session</p>
-                  <p style={{ fontSize: '0.875rem', fontWeight: 600, margin: 0 }}>42 Minutes</p>
-                </div>
+            {/* QUICK STATS */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+              <div style={{ padding: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px' }}>Avg GPA</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, fontFamily: 'Outfit' }}>{data.class_health?.avg_gpa?.toFixed(2) || '--'}</p>
+              </div>
+              <div style={{ padding: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px' }}>Pass Rate</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, fontFamily: 'Outfit' }}>{data.class_health?.pass_rate || 0}%</p>
+              </div>
+              <div style={{ padding: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px' }}>Engagement</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, fontFamily: 'Outfit' }}>{data.class_health?.engagement_score || 0}%</p>
+              </div>
+              <div style={{ padding: 14, background: 'rgba(255,255,255,0.03)', borderRadius: 12, border: '1px solid rgba(255,255,255,0.05)' }}>
+                <p style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 4px' }}>Improving</p>
+                <p style={{ fontSize: '1.1rem', fontWeight: 700, margin: 0, fontFamily: 'Outfit' }}>{data.class_health?.improvement_rate || 0}%</p>
               </div>
             </div>
-          </>
-        )}
+          </>)}
 
-        {data && activeTab === 'insights' && (
-          <>
-            {/* CORRELATION SCATTER PLOT */}
-            <div style={{ marginBottom: '32px' }}>
-              <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', height: '380px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <h2 style={{ fontSize: '1.125rem', fontWeight: 600, margin: 0 }}>Attendance vs Avg Marks Correlation</h2>
-                  <div style={{ display: 'flex', gap: '16px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-green)' }}></div> Top Performer</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--brand-blue)' }}></div> Average</span>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-red)' }}></div> At-Risk</span>
-                  </div>
+          {data && activeTab === 'insights' && (<>
+            <div style={{ marginBottom: 24 }}>
+              <div className="glass-card" style={{ padding: 20, height: 360, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 600, margin: 0 }}>Attendance vs Marks Correlation</h2>
                 </div>
-
-                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <div style={{ flex: 1, minHeight: 0 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                      <XAxis type="number" dataKey="attendance" name="Attendance" unit="%" domain={[0, 100]} stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={{ stroke: "rgba(255,255,255,0.1)" }} tickLine={false} label={{ value: 'Simulated Attendance %', position: 'insideBottom', offset: -10, fill: 'var(--text-secondary)', fontSize: 10 }} />
-                      <YAxis type="number" dataKey="marks" name="Average Marks" unit="%" domain={[0, 100]} stroke="rgba(255,255,255,0.5)" tick={{ fill: 'rgba(255,255,255,0.5)', fontSize: 10 }} axisLine={{ stroke: "rgba(255,255,255,0.1)" }} tickLine={false} label={{ value: 'Average Marks %', angle: -90, position: 'insideLeft', offset: -10, fill: 'var(--text-secondary)', fontSize: 10 }} />
-                      <ZAxis type="number" range={[40, 40]} />
-                      <Tooltip
-                        cursor={{ strokeDasharray: '3 3', stroke: 'rgba(255,255,255,0.1)' }}
-                        contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                        itemStyle={{ color: 'var(--text-primary)' }}
-                      />
+                    <ScatterChart margin={{ top: 16, right: 16, bottom: 16, left: 16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                      <XAxis type="number" dataKey="attendance" name="Attendance" unit="%" domain={[0, 100]} stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={{ stroke: 'rgba(255,255,255,0.08)' }} tickLine={false} />
+                      <YAxis type="number" dataKey="marks" name="Marks" unit="%" domain={[0, 100]} stroke="rgba(255,255,255,0.4)" tick={{ fill: 'rgba(255,255,255,0.4)', fontSize: 10 }} axisLine={{ stroke: 'rgba(255,255,255,0.08)' }} tickLine={false} />
+                      <ZAxis type="number" range={[35, 35]} />
+                      <Tooltip cursor={{ strokeDasharray: '3 3', stroke: 'rgba(255,255,255,0.08)' }} contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
                       <Scatter name="Students" data={data.correlation_analysis}>
-                        {
-                          data.correlation_analysis.map((entry, index) => {
-                            let fill = 'var(--brand-blue)';
-                            if (entry.marks >= 80) fill = 'var(--color-green)';
-                            else if (entry.marks < 50) fill = 'var(--color-red)';
-                            return <Cell key={`cell-${index}`} fill={fill} style={{ filter: `drop-shadow(0 0 4px ${fill}80)` }} />
-                          })
-                        }
+                        {data.correlation_analysis.map((entry, i) => {
+                          let fill = 'var(--brand-blue)';
+                          if (entry.marks >= 80) fill = 'var(--color-green)';
+                          else if (entry.marks < 50) fill = 'var(--color-red)';
+                          return <Cell key={i} fill={fill} />;
+                        })}
                       </Scatter>
                     </ScatterChart>
                   </ResponsiveContainer>
@@ -493,327 +684,298 @@ function App() {
               </div>
             </div>
 
-            {/* BELL CURVE DISTRIBUTIONS CHART */}
-            <div>
-              <h2 className="section-title">Score Distributions (Bell Curves)</h2>
-              <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-                {formattedChartData.map((chartData, idx) => {
-                  const colors = [
-                    { border: 'border-purple', chartColor: '#a855f7' },
-                    { border: 'border-blue', chartColor: '#3b82f6' },
-                    { border: 'border-green', chartColor: '#22c55e' },
-                    { border: 'border-orange', chartColor: '#f97316' }
-                  ];
-                  const style = colors[idx % colors.length];
-                  return (
-                    <div key={idx} className="overview-card" style={{ height: '300px', display: 'flex', flexDirection: 'column' }}>
-                      <div className="card-label" style={{ marginBottom: '16px', color: 'var(--text-primary)', fontSize: '1.1rem' }}>
-                        {chartData[0].subject}
-                      </div>
-                      <div style={{ flex: 1, minHeight: 0 }}>
-                        <ResponsiveContainer width="100%" height="100%">
-                          <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id={`colorCount-${idx}`} x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor={style.chartColor} stopOpacity={0.8} />
-                                <stop offset="95%" stopColor={style.chartColor} stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
-                            <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                            <YAxis stroke="var(--text-secondary)" fontSize={12} tickLine={false} axisLine={false} />
-                            <Tooltip
-                              contentStyle={{ backgroundColor: 'var(--panel-bg)', border: `1px solid ${style.chartColor}`, borderRadius: '8px', color: 'white' }}
-                              cursor={{ stroke: 'rgba(255,255,255,0.1)', strokeWidth: 2 }}
-                            />
-                            <Area type="monotone" dataKey="count" stroke={style.chartColor} strokeWidth={3} fillOpacity={1} fill={`url(#colorCount-${idx})`} animationDuration={1000} />
-                          </AreaChart>
-                        </ResponsiveContainer>
-                      </div>
+            <h2 className="section-title">Score Distributions</h2>
+            <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)', marginBottom: 24 }}>
+              {chartData.map((cd, idx) => {
+                const colors = ['#a855f7', '#3b82f6', '#22c55e', '#f97316'];
+                const c = colors[idx % colors.length];
+                return (
+                  <div key={idx} className="overview-card" style={{ height: 260, display: 'flex', flexDirection: 'column' }}>
+                    <div className="card-label" style={{ marginBottom: 12, color: 'var(--text-primary)', fontSize: '1rem' }}>{cd[0].subject}</div>
+                    <div style={{ flex: 1, minHeight: 0 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={cd} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <defs><linearGradient id={`gc-${idx}`} x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={c} stopOpacity={0.6} /><stop offset="95%" stopColor={c} stopOpacity={0} /></linearGradient></defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" vertical={false} />
+                          <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} />
+                          <YAxis stroke="var(--text-secondary)" fontSize={11} tickLine={false} axisLine={false} />
+                          <Tooltip contentStyle={{ backgroundColor: 'var(--panel-bg)', border: `1px solid ${c}`, borderRadius: 8, color: 'white' }} />
+                          <Area type="monotone" dataKey="count" stroke={c} strokeWidth={2} fillOpacity={1} fill={`url(#gc-${idx})`} />
+                        </AreaChart>
+                      </ResponsiveContainer>
                     </div>
-                  );
-                })}
-              </div>
-            </div>  {/* COHORT TIER RING CHART */}
-            <div style={{ marginTop: '32px' }}>
-              <h2 className="section-title">Cohort Tier Breakdown</h2>
-              <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', height: '380px' }}>
-                <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: 'Top Performer', value: data.performance_clusters.filter(c => c.cluster === 'Top Performer').length },
-                          { name: 'Average', value: data.performance_clusters.filter(c => c.cluster === 'Average').length },
-                          { name: 'At-Risk', value: data.performance_clusters.filter(c => c.cluster === 'At-Risk').length },
-                        ]}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={5}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        <Cell key="cell-top" fill="var(--color-green)" />
-                        <Cell key="cell-avg" fill="var(--brand-blue)" />
-                        <Cell key="cell-risk" fill="var(--color-red)" />
-                      </Pie>
-                      <Tooltip
-                        contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: '8px' }}
-                        itemStyle={{ color: 'var(--text-primary)' }}
-                      />
-                      <Legend verticalAlign="bottom" height={36} iconType="circle" />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', textAlign: 'center', marginTop: '-18px' }}>
-                    <div style={{ fontSize: '2.5rem', fontWeight: 700, lineHeight: 1 }}>{data.performance_clusters.length}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Total Students</div>
                   </div>
+                );
+              })}
+            </div>
+
+            <h2 className="section-title">Cohort Tier Breakdown</h2>
+            <div className="glass-card" style={{ padding: 20, height: 340, display: 'flex', flexDirection: 'column' }}>
+              <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={[
+                      { name: 'Top', value: data.performance_clusters.filter(c => c.cluster === 'Top Performer').length },
+                      { name: 'Average', value: data.performance_clusters.filter(c => c.cluster === 'Average').length },
+                      { name: 'At-Risk', value: data.performance_clusters.filter(c => c.cluster === 'At-Risk').length }
+                    ]} cx="50%" cy="50%" innerRadius={55} outerRadius={90} paddingAngle={4} dataKey="value" stroke="none">
+                      <Cell fill="var(--color-green)" /><Cell fill="var(--brand-blue)" /><Cell fill="var(--color-red)" />
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--panel-border)', borderRadius: 8 }} itemStyle={{ color: 'var(--text-primary)' }} />
+                    <Legend verticalAlign="bottom" height={36} iconType="circle" />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%,-50%)', textAlign: 'center' }}>
+                  <div style={{ fontSize: '2rem', fontWeight: 700, lineHeight: 1 }}>{data.performance_clusters.length}</div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Students</div>
                 </div>
               </div>
             </div>
-          </>
-        )}
+          </>)}
 
-        {
-          data && activeTab === 'subjects' && (
-            <>
-              <div>
-                <h2 className="section-title">Highest vs Lowest Per Subject</h2>
-                <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-                  {(() => {
-                    const colors = [
-                      { border: 'border-purple', iconBg: '#a855f720', iconColor: 'var(--color-purple)' },
-                      { border: 'border-blue', iconBg: '#3b82f620', iconColor: 'var(--color-blue)' },
-                      { border: 'border-green', iconBg: '#22c55e20', iconColor: 'var(--color-green)' },
-                      { border: 'border-orange', iconBg: '#f9731620', iconColor: 'var(--color-orange)' }
-                    ];
-                    return data.subject_stats.map((subject, idx) => {
-                      const style = colors[idx % colors.length];
-                      return (
-                        <div key={idx} className={`overview-card ${style.border}`} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: '24px 32px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexWrap: 'wrap' }}>
-                            <div className="card-icon" style={{ backgroundColor: style.iconBg, color: style.iconColor, marginBottom: 0, width: 64, height: 64 }}>
-                              <BookOpen size={32} />
-                            </div>
-                            <div>
-                              <h3 style={{ fontSize: '1.5rem', marginBottom: '8px' }}>{subject.subject}</h3>
-                              <div style={{ color: 'var(--text-secondary)' }}>Class Average: {subject.mean.toFixed(1)}%</div>
-                            </div>
-                          </div>
-
-                          <div style={{ display: 'flex', gap: '48px', alignItems: 'center' }}>
-                            <div style={{ textAlign: 'center' }}>
-                              <div style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--color-green)' }}>{subject.max}</div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Highest</div>
-                            </div>
-                            <div style={{ textAlign: 'center' }}>
-                              <div style={{ fontSize: '2rem', fontWeight: 600, color: 'var(--color-red)' }}>{subject.min}</div>
-                              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Lowest</div>
-                            </div>
-                          </div>
+          {data && activeTab === 'subjects' && (<>
+            <h2 className="section-title">Subject Performance Overview</h2>
+            <div className="overview-grid" style={{ gridTemplateColumns: 'repeat(2,1fr)' }}>
+              {(() => {
+                const styles = [
+                  { border: 'border-purple', iconBg: '#a855f720', iconColor: 'var(--color-purple)' },
+                  { border: 'border-blue', iconBg: '#3b82f620', iconColor: 'var(--color-blue)' },
+                  { border: 'border-green', iconBg: '#22c55e20', iconColor: 'var(--color-green)' },
+                  { border: 'border-orange', iconBg: '#f9731620', iconColor: 'var(--color-orange)' }
+                ];
+                return data.subject_stats.map((subj, idx) => {
+                  const s = styles[idx % styles.length];
+                  const diff = data.subject_difficulty?.find(d => d.subject === subj.subject);
+                  return (
+                    <div key={idx} className={`overview-card ${s.border}`} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                        <div className="card-icon" style={{ background: s.iconBg, color: s.iconColor, marginBottom: 0, width: 52, height: 52 }}>
+                          <BookOpen size={24} />
                         </div>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            </>
-          )
-        }
+                        <div>
+                          <h3 style={{ fontSize: '1.2rem', marginBottom: 4 }}>{subj.subject}</h3>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>Avg: {subj.mean.toFixed(1)}%</div>
+                          {diff && <div style={{ color: 'var(--text-secondary)', fontSize: '0.75rem', marginTop: 2 }}>Difficulty: {diff.difficulty_index.toFixed(0)}/100</div>}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 32, alignItems: 'center' }}>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--color-green)' }}>{subj.max}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Highest</div>
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '1.5rem', fontWeight: 600, color: 'var(--color-red)' }}>{subj.min}</div>
+                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Lowest</div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </div>
+          </>)}
 
-        {
-          data && activeTab === 'interventions' && (
-            <>
-              <h2 className="section-title" style={{ color: 'var(--color-red)' }}>Critical Interventions Required</h2>
+          {data && activeTab === 'students' && (<>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h2 className="section-title" style={{ margin: 0 }}>Student Rankings</h2>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{data.student_rankings.length} students</span>
+            </div>
+            <div className="glass-card" style={{ padding: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '50px 1fr 80px 80px 80px 100px', gap: 12, padding: '8px 16px', fontSize: '0.75rem', color: 'var(--text-secondary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                <span>Rank</span><span>Student</span><span>GPA</span><span>Avg</span><span>%ile</span><span>Trend</span>
+              </div>
+              {data.student_rankings.map((s, i) => {
+                const medal = i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+                const medalColor = i === 0 ? '#f59e0b' : i === 1 ? '#9ca3af' : i === 2 ? '#d97706' : 'rgba(255,255,255,0.1)';
+                const trendColor = s.trend === 'improving' ? 'improving' : s.trend === 'declining' ? 'declining' : 'stable';
+                const trendIcon = s.trend === 'improving' ? <ChevronUp size={12} /> : s.trend === 'declining' ? <ChevronDown size={12} /> : <Minus size={12} />;
+                return (
+                  <div key={s.student_id} className={`leaderboard-row ${medal}`} style={{ animationDelay: `${i * 0.05}s` }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '50px 1fr 80px 80px 80px 100px', gap: 12, alignItems: 'center', width: '100%' }}>
+                      <div className="rank-badge" style={{ background: medalColor, color: i < 3 ? '#000' : 'var(--text-primary)', fontSize: i < 3 ? '0.85rem' : '0.8rem' }}>
+                        {i < 3 ? <Trophy size={14} /> : s.rank}
+                      </div>
+                      <div>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{s.name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>ID: {s.student_id}</div>
+                      </div>
+                      <div style={{ fontWeight: 600, fontFamily: 'Outfit' }}>{s.gpa.toFixed(2)}</div>
+                      <div style={{ fontFamily: 'Outfit' }}>{s.average_score}%</div>
+                      <div style={{ fontFamily: 'Outfit' }}>{s.percentile}th</div>
+                      <span className={`trend-indicator ${trendColor}`}>{trendIcon}{s.trend}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>)}
+
+          {data && activeTab === 'interventions' && (<>
+            <h2 className="section-title" style={{ color: 'var(--color-red)' }}>Critical Interventions Required</h2>
+            <div className="glass-card" style={{ padding: 4 }}>
               <div className="data-table-container">
                 <table className="data-table">
-                  <thead>
-                    <tr>
-                      <th>Student</th>
-                      <th>Status</th>
-                      <th>Flagged Metric</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
+                  <thead><tr><th>Student</th><th>Status</th><th>Metric</th><th>Action</th></tr></thead>
                   <tbody>
-                    {data.at_risk_students.map((student, idx) => (
-                      <tr key={`risk-${idx}`}>
-                        <td style={{ fontWeight: 500 }}>{student.name} <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>({student.student_id})</span></td>
-                        <td><span style={{ background: '#ef444420', color: 'var(--color-red)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 600 }}>AT RISK</span></td>
-                        <td>Z-Score: {student.risk_score}</td>
-                        <td><button className="btn-upload" style={{ background: 'var(--color-red)', color: 'white', padding: '6px 12px', fontSize: '0.8rem' }}>Schedule Review</button></td>
+                    {data.at_risk_students.map((s, i) => (
+                      <tr key={`r-${i}`}>
+                        <td style={{ fontWeight: 500 }}>{s.name} <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>({s.student_id})</span></td>
+                        <td><span style={{ background: 'rgba(239,68,68,0.15)', color: 'var(--color-red)', padding: '3px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600 }}>AT RISK</span></td>
+                        <td>Z-Score: {s.risk_score}</td>
+                        <td><button className="btn-secondary" style={{ padding: '5px 12px', fontSize: '0.8rem', background: 'rgba(239,68,68,0.15)', borderColor: 'rgba(239,68,68,0.3)', color: 'var(--color-red)' }}>Review</button></td>
                       </tr>
                     ))}
-                    {[...data.marks_warnings]
-                      .sort((a, b) => {
-                        const aSent = sentWarnings.has(a.student_id);
-                        const bSent = sentWarnings.has(b.student_id);
-                        if (aSent === bSent) return 0;
-                        return aSent ? 1 : -1;
-                      })
-                      .map((student) => {
-                        const isSent = sentWarnings.has(student.student_id);
-                        return (
-                          <tr key={`warning-${student.student_id}`} style={{ opacity: isSent ? 0.6 : 1 }}>
-                            <td style={{ fontWeight: 500 }}>{student.name} <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>({student.student_id})</span></td>
-                            <td><span style={{ background: '#f9731620', color: 'var(--color-orange)', padding: '4px 8px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 600 }}>40-50 MARKS</span></td>
-                            <td>Avg: {student.marks}</td>
-                            <td>
-                              <button
-                                className="btn-upload"
-                                style={{
-                                  background: isSent ? 'var(--color-green)' : 'var(--color-orange)',
-                                  color: 'white',
-                                  padding: '6px 12px',
-                                  fontSize: '0.8rem'
-                                }}
-                                onClick={() => {
-                                  if (!isSent) {
-                                    setSentWarnings(prev => new Set(prev).add(student.student_id));
-                                  }
-                                }}
-                              >
-                                {isSent ? 'Sent' : 'Send Warning'}
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    }
-                    {(data.at_risk_students.length === 0 && data.marks_warnings.length === 0) && (
-                      <tr>
-                        <td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-green)', padding: '32px' }}>
-                          No students currently require critical intervention.
-                        </td>
-                      </tr>
+                    {[...data.marks_warnings].sort((a, b) => (sentWarnings.has(a.student_id) ? 1 : 0) - (sentWarnings.has(b.student_id) ? 1 : 0)).map(s => {
+                      const sent = sentWarnings.has(s.student_id);
+                      return (
+                        <tr key={`w-${s.student_id}`} style={{ opacity: sent ? 0.5 : 1 }}>
+                          <td style={{ fontWeight: 500 }}>{s.name} <span style={{ color: 'var(--text-secondary)', fontSize: '0.8rem' }}>({s.student_id})</span></td>
+                          <td><span style={{ background: 'rgba(245,158,11,0.15)', color: 'var(--color-orange)', padding: '3px 8px', borderRadius: 6, fontSize: '0.75rem', fontWeight: 600 }}>40-50 MARKS</span></td>
+                          <td>Avg: {s.marks}</td>
+                          <td><button className="btn-secondary" onClick={() => { if (!sent) setSentWarnings(p => new Set(p).add(s.student_id)) }} style={{ padding: '5px 12px', fontSize: '0.8rem', background: sent ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.15)', borderColor: sent ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.3)', color: sent ? 'var(--color-green)' : 'var(--color-orange)' }}>{sent ? 'Sent' : 'Warn'}</button></td>
+                        </tr>
+                      );
+                    })}
+                    {data.at_risk_students.length === 0 && data.marks_warnings.length === 0 && (
+                      <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--color-green)', padding: 32 }}>No interventions needed!</td></tr>
                     )}
                   </tbody>
                 </table>
               </div>
-            </>
-          )
-        }
-
-        {
-          data && ['calendar', 'settings'].includes(activeTab) && (
-            <div className="center-message">
-              <Target size={48} style={{ opacity: 0.5 }} />
-              <h2>Under Construction</h2>
-              <p>This view is coming in a future update.</p>
             </div>
-          )
-        }
+          </>)}
 
-        {activeTab === 'profile' && (
-          <div className="glass-card" style={{ padding: '32px', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
-            <div className="profile-avatar" style={{ width: '96px', height: '96px', margin: '0 auto 24px auto', border: '2px solid var(--brand-blue)' }}></div>
-            <h2 style={{ fontSize: '2rem', marginBottom: '8px' }}>{data ? data.user_profile.name : "Rachit Goyal"}</h2>
-            <p style={{ color: 'var(--brand-blue)', fontWeight: 600, fontSize: '1.2rem', marginBottom: '8px' }}>{data ? data.user_profile.role : "Lead Educator"}</p>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '1rem', marginBottom: '32px' }}>{data ? data.user_profile.institution : "Tech Innovators Academy"}</p>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', textAlign: 'left' }}>
-              <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '12px' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 8px 0' }}>Contact Email</p>
-                <p style={{ fontSize: '1.1rem', fontWeight: 500, margin: 0, color: 'var(--text-primary)' }}>{email}</p>
-              </div>
-              <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '12px' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 8px 0' }}>Department</p>
-                <p style={{ fontSize: '1.1rem', fontWeight: 500, margin: 0, color: 'var(--color-purple)' }}>Computer Science</p>
-              </div>
-              <div style={{ background: 'rgba(255,255,255,0.05)', padding: '16px', borderRadius: '12px', gridColumn: 'span 2' }}>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 8px 0' }}>Latest Activity</p>
-                <p style={{ fontSize: '1rem', margin: 0, color: 'var(--text-primary)' }}>Uploaded CSV data for recent Term</p>
+          {activeTab === 'profile' && (
+            <div className="glass-card" style={{ padding: 32, maxWidth: 580, margin: '0 auto', textAlign: 'center' }}>
+              <div className="profile-avatar" style={{ width: 88, height: 88, margin: '0 auto 20px', border: '3px solid var(--brand-blue)' }} />
+              <h2 style={{ fontSize: '1.6rem', marginBottom: 4 }}>{data ? data.user_profile.name : 'Rachit Goyal'}</h2>
+              <p style={{ color: 'var(--brand-blue-light)', fontWeight: 600, fontSize: '1rem', marginBottom: 4 }}>{data ? data.user_profile.role : 'Lead Educator'}</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: 28 }}>{data ? data.user_profile.institution : 'Tech Innovators Academy'}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, textAlign: 'left' }}>
+                <div style={{ background: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 12 }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 6px' }}>Email</p>
+                  <p style={{ fontSize: '0.95rem', fontWeight: 500, margin: 0 }}>{email || 'admin@academy.edu'}</p>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 12 }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 6px' }}>Department</p>
+                  <p style={{ fontSize: '0.95rem', fontWeight: 500, margin: 0, color: 'var(--color-purple)' }}>Computer Science</p>
+                </div>
+                {data && <div style={{ background: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 12, gridColumn: 'span 2' }}>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 700, margin: '0 0 6px' }}>Quick Stats</p>
+                  <p style={{ fontSize: '0.9rem', margin: 0 }}>{data.overall_students_analyzed} students analyzed · {data.subject_stats.length} subjects · Class Health: {data.class_health?.grade || '--'}</p>
+                </div>}
               </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
 
-      {/* 3. RIGHT SIDEBAR PANEL */}
-      <aside className="right-panel">
-
-        {/* Profile User Stub */}
-        <div className="profile-card">
-          <div className="profile-avatar"></div>
-          <div>
-            <div style={{ fontWeight: 600, fontSize: '1.1rem' }}>{data ? data.user_profile.name : "Rachit Goyal"}</div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              {data ? `${data.overall_students_analyzed} Students Loaded` : "Awaiting Data"}
-            </div>
-          </div>
-        </div>
-
-        {data && (
-          <>
-            {/* Mini Calendar replaced Negative Trends */}
+        {/* RIGHT PANEL */}
+        <aside className="right-panel">
+          <div className="profile-card">
+            <div className="profile-avatar" />
             <div>
-              <h2 className="section-title">Academic Calendar</h2>
-              <div className="glass-card" style={{ padding: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                  <span style={{ fontWeight: 600 }}>March 2026</span>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <span style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>&lt;</span>
-                    <span style={{ cursor: 'pointer', color: 'var(--text-secondary)' }}>&gt;</span>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>{data ? data.user_profile.name : 'Rachit Goyal'}</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{data ? `${data.overall_students_analyzed} Students` : 'Awaiting Data'}</div>
+            </div>
+          </div>
+
+          {data && (<>
+            {/* Class Health Gauge */}
+            <div>
+              <h2 className="section-title" style={{ fontSize: '0.85rem' }}>Class Health</h2>
+              <div className="glass-card" style={{ padding: 20, textAlign: 'center' }}>
+                <div className="health-gauge" style={{ border: `3px solid ${healthColor(data.class_health?.overall_score || 0)}`, boxShadow: `0 0 20px ${healthColor(data.class_health?.overall_score || 0)}30` }}>
+                  <div>
+                    <div className="health-gauge-value" style={{ color: healthColor(data.class_health?.overall_score || 0) }}>{data.class_health?.overall_score || 0}</div>
+                    <div className="health-gauge-label">{data.class_health?.grade || '--'}</div>
                   </div>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '4px', textAlign: 'center', fontSize: '0.8rem' }}>
-                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={`day-${i}`} style={{ color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 600 }}>{d}</div>)}
+              </div>
+            </div>
+
+            {/* Calendar */}
+            <div>
+              <h2 className="section-title" style={{ fontSize: '0.85rem' }}>Calendar</h2>
+              <div className="glass-card" style={{ padding: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>March 2026</span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 3, textAlign: 'center', fontSize: '0.75rem' }}>
+                  {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => <div key={i} style={{ color: 'var(--text-secondary)', marginBottom: 6, fontWeight: 600, fontSize: '0.65rem' }}>{d}</div>)}
                   {Array.from({ length: 31 }).map((_, i) => (
                     <div key={i} style={{
-                      padding: '6px 0',
-                      borderRadius: '6px',
-                      backgroundColor: i + 1 === 5 ? 'var(--brand-blue)' : (i + 1 === 18 ? 'rgba(239, 68, 68, 0.2)' : 'transparent'),
-                      color: i + 1 === 5 ? 'white' : (i + 1 === 18 ? 'var(--color-red)' : 'var(--text-primary)'),
-                      fontWeight: i + 1 === 5 || i + 1 === 18 ? 700 : 400,
-                      cursor: 'pointer'
-                    }}>
-                      {i + 1}
+                      padding: '5px 0', borderRadius: 6,
+                      background: i + 1 === 8 ? 'var(--brand-blue)' : (i + 1 === 18 ? 'rgba(239,68,68,0.15)' : 'transparent'),
+                      color: i + 1 === 8 ? 'white' : (i + 1 === 18 ? 'var(--color-red)' : 'var(--text-primary)'),
+                      fontWeight: i + 1 === 8 || i + 1 === 18 ? 700 : 400, fontSize: '0.8rem', cursor: 'pointer'
+                    }}>{i + 1}</div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.7rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--brand-blue)', display: 'inline-block' }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>Today</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 3, background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.4)', display: 'inline-block' }} />
+                    <span style={{ color: 'var(--text-secondary)' }}>Parent-Teacher Meeting Deadline</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* At-Risk Alerts */}
+            {data.at_risk_students.length > 0 && (
+              <div>
+                <h2 className="section-title" style={{ fontSize: '0.85rem', color: 'var(--color-red)' }}>At-Risk Alerts</h2>
+                <div className="timeline-list">
+                  {data.at_risk_students.map((s, i) => (
+                    <div key={i} style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', padding: 10, borderRadius: 8, fontSize: '0.8rem' }}>
+                      <span style={{ fontWeight: 600 }}>{s.name}</span> — Z: <span style={{ color: 'var(--color-red)' }}>{s.risk_score}</span>
                     </div>
                   ))}
                 </div>
-                <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.8rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--brand-blue)' }}></div>
-                    <span style={{ color: 'var(--text-secondary)' }}>Today</span>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--color-red)' }}></div>
-                    <span style={{ color: 'var(--text-secondary)' }}>Mid-Term Exams Start</span>
-                  </div>
-                </div>
               </div>
-            </div>
+            )}
+          </>)}
+        </aside>
 
-            {/* At-Risk Cohort (Mimicking 'Academic Calendar' events) */}
-            <div>
-              <h2 className="section-title">At-Risk Intervention Alert</h2>
-              <div className="timeline-list">
-                {data.at_risk_students.length === 0 ? (
-                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>No immediate interventions required.</div>
-                ) : (
-                  data.at_risk_students.map((student, idx) => {
-                    return (
-                      <div key={idx} style={{
-                        background: '#ef444420',
-                        border: '1px solid var(--color-red)',
-                        padding: '12px',
-                        borderRadius: '8px',
-                        fontSize: '0.9rem'
-                      }}>
-                        <span style={{ fontWeight: 600, color: 'white' }}>{student.name}</span> is critically below cohort average. (Z-Score: <span style={{ color: 'var(--color-red)' }}>{student.risk_score}</span>)
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-            </div>
-          </>
+        {/* FAB */}
+        {!chatOpen && (
+          <button className="fab-ai" onClick={() => setChatOpen(true)} title="AI Chat">
+            <MessageCircle size={24} />
+          </button>
         )}
-      </aside>
 
-    </div>
+        {/* Chat Drawer */}
+        {chatOpen && (<>
+          <div className="chat-overlay" onClick={() => setChatOpen(false)} />
+          <div className="chat-drawer">
+            <div className="chat-header">
+              <h3><Brain size={20} style={{ color: 'var(--brand-blue-light)' }} /> AI Advisor</h3>
+              <button className="chat-close" onClick={() => setChatOpen(false)}><X size={20} /></button>
+            </div>
+            <div className="chat-messages">
+              {chatMessages.map((m, i) => (
+                <div key={i} className={`chat-message ${m.role}`}>
+                  {m.content.split('\n').map((line, j) => <span key={j}>{line}<br /></span>)}
+                </div>
+              ))}
+              {chatLoading && <div className="chat-message assistant"><div className="skeleton" style={{ height: 16, width: 120 }} /></div>}
+              <div ref={chatEndRef} />
+            </div>
+            <div className="chat-input-area">
+              <input className="chat-input" value={chatInput} onChange={e => setChatInput(e.target.value)}
+                placeholder="Ask about student performance..." onKeyDown={e => { if (e.key === 'Enter') sendChat() }} />
+              <button className="chat-send" onClick={sendChat} disabled={chatLoading || !chatInput.trim()}>
+                <Send size={18} />
+              </button>
+            </div>
+          </div>
+        </>)}
+
+      </div>
+    </>
   );
 }
 

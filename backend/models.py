@@ -56,6 +56,42 @@ class CohortMigration(BaseModel):
     average: int = Field(description="Count of average students")
     at_risk: int = Field(description="Count of at-risk students")
 
+# ===== NEW MODELS =====
+
+class StudentRanking(BaseModel):
+    rank: int = Field(description="Student rank in class")
+    student_id: str = Field(description="Student ID")
+    name: str = Field(description="Student name")
+    average_score: float = Field(description="Average score across all subjects")
+    gpa: float = Field(description="GPA on 4.0 scale")
+    percentile: float = Field(description="Percentile rank")
+    trend: str = Field(description="Trend direction: improving, stable, or declining")
+
+class ClassHealth(BaseModel):
+    overall_score: int = Field(description="Overall class health score 0-100")
+    pass_rate: float = Field(description="Percentage of students passing (>=50)")
+    engagement_score: int = Field(description="Engagement score 0-100")
+    improvement_rate: float = Field(description="Percentage of students who improved")
+    avg_gpa: float = Field(description="Class average GPA")
+    grade: str = Field(description="Letter grade for class health: A, B, C, D, F")
+
+class SubjectDifficulty(BaseModel):
+    subject: str = Field(description="Subject name")
+    difficulty_index: float = Field(description="Difficulty index 0-100 (100=hardest)")
+    fail_rate: float = Field(description="Percentage of students below 50")
+    spread: float = Field(description="Score spread (max - min)")
+
+class AIChatRequest(BaseModel):
+    question: str = Field(description="The user's question")
+    chat_history: Optional[List[Dict]] = Field(default=None, description="Previous chat messages")
+
+class AIChatResponse(BaseModel):
+    response: str = Field(description="The AI's response")
+
+class AIInsightsResponse(BaseModel):
+    summary: str = Field(description="Executive summary")
+    insights: List[Dict] = Field(description="List of insight objects")
+
 class DashboardAnalyticsResponse(BaseModel):
     overall_students_analyzed: int = Field(description="Total number of unique students processed")
     subject_stats: List[SubjectStats] = Field(description="Statistics broken down by subject")
@@ -68,3 +104,7 @@ class DashboardAnalyticsResponse(BaseModel):
     correlation_analysis: List[CorrelationAnalysis] = Field(description="Data for scatter plot", default=[])
     cohort_migration: List[CohortMigration] = Field(description="Data for stacked bar chart", default=[])
     user_profile: UserProfile = Field(description="User profile details")
+    # New fields
+    student_rankings: List[StudentRanking] = Field(description="Ranked list of students", default=[])
+    class_health: Optional[ClassHealth] = Field(description="Overall class health score", default=None)
+    subject_difficulty: List[SubjectDifficulty] = Field(description="Difficulty index per subject", default=[])
